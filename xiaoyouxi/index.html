@@ -1,0 +1,950 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gesture Pastel Painter</title>
+  <style>
+    :root {
+      --ink: #1642ae;
+      --panel: rgba(255, 255, 255, .82);
+      --panel-line: rgba(14, 47, 112, .16);
+      --blue-1: #5d98d7;
+      --blue-2: #9fc8ea;
+      --blue-3: #1d57ad;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #dceeff url("assets/site-background-landscape.png") center center / cover no-repeat fixed;
+      color: #12336b;
+    }
+
+    #scene {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      display: none;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      opacity: 0;
+      background:
+        radial-gradient(circle at 18% 22%, rgba(255,255,255,.34), transparent 24%),
+        radial-gradient(circle at 78% 28%, rgba(35,91,171,.28), transparent 28%),
+        repeating-linear-gradient(118deg, rgba(255,255,255,.08) 0 2px, transparent 2px 9px),
+        repeating-linear-gradient(22deg, rgba(25,72,151,.08) 0 1px, transparent 1px 7px);
+      mix-blend-mode: soft-light;
+    }
+
+    .app {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 28px 22px 118px;
+    }
+
+    .canvas-shell {
+      position: relative;
+      width: min(74vmin, 760px);
+      height: min(74vmin, 760px);
+      filter: drop-shadow(0 24px 46px rgba(20, 49, 103, .26));
+      transition: width .35s ease, height .35s ease;
+    }
+
+    .canvas-shell.mousepad {
+      width: min(72vw, 690px);
+      height: min(63vh, 520px);
+      aspect-ratio: 4 / 3;
+    }
+
+    .canvas-shell.bag {
+      width: min(66vw, 620px);
+      height: min(68vh, 710px);
+      aspect-ratio: 7 / 8;
+    }
+
+    .canvas-shell.eyemask {
+      width: min(78vw, 790px);
+      height: min(38vh, 330px);
+      aspect-ratio: 2.42 / 1;
+    }
+
+    .surface {
+      position: absolute;
+      inset: 0;
+      background: #fff;
+      overflow: hidden;
+      box-shadow:
+        inset 0 0 0 1px rgba(25, 55, 112, .08),
+        inset 0 0 38px rgba(39, 82, 142, .035);
+    }
+
+    .handkerchief .surface {
+      border-radius: 8px;
+      clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    }
+
+    .mousepad .surface {
+      border-radius: 18px;
+      clip-path: inset(0 round 18px);
+    }
+
+    .bag .surface {
+      border-radius: 10px 10px 28px 28px;
+      clip-path: polygon(5% 0, 95% 0, 100% 100%, 0 100%);
+    }
+
+    .bag .surface::before {
+      content: "";
+      position: absolute;
+      left: 30%;
+      right: 30%;
+      top: -1%;
+      height: 18%;
+      border: 10px solid rgba(237, 239, 243, .95);
+      border-bottom: 0;
+      border-radius: 999px 999px 0 0;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .eyemask .surface {
+      border-radius: 999px;
+      clip-path: polygon(3.5% 52%, 5% 39%, 9% 27%, 16% 17%, 25% 14%, 35% 18%, 45% 31%, 50% 35%, 55% 31%, 65% 18%, 75% 14%, 84% 17%, 91% 27%, 95% 39%, 96.5% 52%, 95% 65%, 90% 77%, 82% 85%, 72% 86%, 62% 80%, 54% 69%, 50% 65%, 46% 69%, 38% 80%, 28% 86%, 18% 85%, 10% 77%, 5% 65%);
+    }
+
+    canvas.paint-layer {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    .preview-layer {
+      opacity: .9;
+      pointer-events: none;
+    }
+
+    .toolbar {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: var(--panel);
+      border: 1px solid var(--panel-line);
+      border-radius: 24px;
+      box-shadow: 0 20px 52px rgba(18, 50, 112, .24);
+      backdrop-filter: blur(18px);
+    }
+
+    .tool-button, .shape-button {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(22, 66, 174, .14);
+      border-radius: 16px;
+      background: rgba(255,255,255,.7);
+      color: #1746a5;
+      padding: 0;
+      cursor: pointer;
+      transition: transform .16s ease, background .16s ease, border-color .16s ease;
+    }
+
+    .tool-button:hover, .shape-button:hover, .tool-button.active, .shape-button.active {
+      transform: translateY(-2px);
+      background: #fff;
+      border-color: rgba(22, 66, 174, .34);
+    }
+
+    .tool-button svg, .shape-button svg {
+      width: 24px;
+      height: 24px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .slider-wrap {
+      width: 130px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      padding: 0 8px;
+      border: 1px solid rgba(22, 66, 174, .12);
+      border-radius: 16px;
+      background: rgba(255,255,255,.56);
+    }
+
+    input[type="range"] {
+      width: 106px;
+      accent-color: var(--ink);
+      cursor: pointer;
+    }
+
+    .shape-menu {
+      position: absolute;
+      left: 50%;
+      bottom: 82px;
+      transform: translateX(-50%) translateY(10px);
+      display: grid;
+      grid-template-columns: repeat(4, 48px);
+      gap: 10px;
+      padding: 10px;
+      border-radius: 22px;
+      border: 1px solid var(--panel-line);
+      background: var(--panel);
+      box-shadow: 0 16px 40px rgba(18, 50, 112, .22);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .shape-menu.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    #cursor {
+      position: fixed;
+      z-index: 8;
+      left: 0;
+      top: 0;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      pointer-events: none;
+      border: 2px solid rgba(22, 66, 174, .95);
+      background: rgba(255, 255, 255, .48);
+      box-shadow: 0 0 0 8px rgba(22, 66, 174, .12);
+      transform: translate(-100px, -100px);
+      transition: width .08s linear, height .08s linear, opacity .18s ease;
+      opacity: 0;
+    }
+
+    .dwell-ring {
+      position: fixed;
+      z-index: 9;
+      left: 0;
+      top: 0;
+      width: 58px;
+      height: 58px;
+      pointer-events: none;
+      border-radius: 50%;
+      border: 4px solid rgba(22, 66, 174, .2);
+      background: conic-gradient(var(--ink) calc(var(--dwell, 0) * 1turn), transparent 0);
+      transform: translate(-100px, -100px);
+      opacity: 0;
+      mask: radial-gradient(circle, transparent 58%, #000 60%);
+    }
+
+    .camera-card {
+      position: fixed;
+      right: 18px;
+      top: 18px;
+      z-index: 6;
+      width: 168px;
+      height: 126px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.46);
+      border-radius: 18px;
+      background: rgba(255,255,255,.2);
+      box-shadow: 0 12px 30px rgba(22, 57, 122, .2);
+    }
+
+    .camera-card video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      opacity: .9;
+    }
+
+    .status {
+      position: fixed;
+      left: 18px;
+      top: 18px;
+      z-index: 6;
+      max-width: min(420px, calc(100vw - 220px));
+      padding: 10px 14px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.72);
+      border: 1px solid rgba(255,255,255,.5);
+      box-shadow: 0 12px 30px rgba(22, 57, 122, .16);
+      font-size: 13px;
+      line-height: 1.45;
+      color: #153c86;
+      backdrop-filter: blur(14px);
+    }
+
+    .hidden { display: none; }
+
+    @media (max-width: 720px) {
+      .app { padding: 84px 12px 116px; }
+      .camera-card { width: 118px; height: 88px; }
+      .status { max-width: calc(100vw - 154px); font-size: 12px; }
+      .toolbar { gap: 7px; padding: 9px; border-radius: 20px; }
+      .tool-button, .shape-button { width: 42px; height: 42px; border-radius: 14px; }
+      .slider-wrap { width: 92px; height: 42px; }
+      input[type="range"] { width: 72px; }
+      .shape-menu { grid-template-columns: repeat(4, 42px); bottom: 70px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <div class="app">
+    <div id="canvasShell" class="canvas-shell handkerchief">
+      <div class="surface">
+        <canvas id="paint" class="paint-layer"></canvas>
+        <canvas id="preview" class="paint-layer preview-layer"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div id="toolbar" class="toolbar" aria-label="tools">
+    <button class="tool-button" id="undo" aria-label="返回上一步" title="返回上一步">
+      <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg>
+    </button>
+    <button class="tool-button" id="redo" aria-label="下一步" title="下一步">
+      <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h2"/></svg>
+    </button>
+    <div class="slider-wrap" data-tool="opacity" aria-label="透明度">
+      <input id="opacity" aria-label="透明度" type="range" min="0.08" max="1" step="0.01" value="0.82">
+    </div>
+    <button class="tool-button" id="save" aria-label="保存" title="保存">
+      <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+    </button>
+    <button class="tool-button" id="shapeToggle" aria-label="选择画布" title="选择画布">
+      <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg>
+    </button>
+    <div id="shapeMenu" class="shape-menu" aria-label="canvas shapes">
+      <button class="shape-button active" data-shape="handkerchief" aria-label="方形手帕" title="方形手帕">
+        <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
+      </button>
+      <button class="shape-button" data-shape="eyemask" aria-label="眼罩" title="眼罩">
+        <svg viewBox="0 0 24 24"><path d="M2 13c1-5 5-6 9-2 1 1 1 1 2 0 4-4 8-3 9 2-1 5-6 6-9 2-1-1-1-1-2 0-3 4-8 3-9-2Z"/></svg>
+      </button>
+      <button class="shape-button" data-shape="mousepad" aria-label="长方形鼠标垫" title="长方形鼠标垫">
+        <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>
+      </button>
+      <button class="shape-button" data-shape="bag" aria-label="帆布包" title="帆布包">
+        <svg viewBox="0 0 24 24"><path d="M6 8h12l2 13H4L6 8Z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="cursor"></div>
+  <div id="dwellRing" class="dwell-ring"></div>
+  <div class="camera-card"><video id="video" autoplay muted playsinline></video></div>
+  <div id="status" class="status">正在请求摄像头权限...</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    const state = {
+      shape: "handkerchief",
+      color: "#1642ae",
+      opacity: .82,
+      mode: "brush",
+      lastPoint: null,
+      lastMidPoint: null,
+      drawing: false,
+      undo: [],
+      redo: [],
+      rightHand: null,
+      leftHand: null,
+      circle: null,
+      lastToolTarget: null,
+      smoothedToolPoint: null,
+      dwellStart: 0,
+      mediaReady: false,
+      handsReady: false,
+      detectorCanvas: document.createElement("canvas")
+    };
+
+    const shell = document.getElementById("canvasShell");
+    const paint = document.getElementById("paint");
+    const preview = document.getElementById("preview");
+    const pctx = paint.getContext("2d", { willReadFrequently: true });
+    const vctx = preview.getContext("2d");
+    const toolbar = document.getElementById("toolbar");
+    const opacity = document.getElementById("opacity");
+    const cursor = document.getElementById("cursor");
+    const dwellRing = document.getElementById("dwellRing");
+    const video = document.getElementById("video");
+    const statusBox = document.getElementById("status");
+    const shapeMenu = document.getElementById("shapeMenu");
+
+    function fitCanvases() {
+      const rect = shell.getBoundingClientRect();
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      for (const canvas of [paint, preview]) {
+        canvas.width = Math.round(rect.width * dpr);
+        canvas.height = Math.round(rect.height * dpr);
+        canvas.style.width = rect.width + "px";
+        canvas.style.height = rect.height + "px";
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+    }
+
+    function snapshot() {
+      state.undo.push(paint.toDataURL("image/png"));
+      if (state.undo.length > 40) state.undo.shift();
+      state.redo.length = 0;
+    }
+
+    function restore(dataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        pctx.clearRect(0, 0, paint.width, paint.height);
+        pctx.setTransform(1, 0, 0, 1, 0, 0);
+        pctx.drawImage(img, 0, 0, paint.width, paint.height);
+        const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+        pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      };
+      img.src = dataUrl;
+    }
+
+    function undo() {
+      if (!state.undo.length) return;
+      state.redo.push(paint.toDataURL("image/png"));
+      restore(state.undo.pop());
+    }
+
+    function redo() {
+      if (!state.redo.length) return;
+      state.undo.push(paint.toDataURL("image/png"));
+      restore(state.redo.pop());
+    }
+
+    function shapePath(ctx, w, h, shape = state.shape) {
+      ctx.beginPath();
+      if (shape === "eyemask") {
+        ctx.moveTo(w * .035, h * .52);
+        ctx.bezierCurveTo(w * .06, h * .18, w * .27, h * .04, w * .45, h * .25);
+        ctx.bezierCurveTo(w * .49, h * .30, w * .51, h * .30, w * .55, h * .25);
+        ctx.bezierCurveTo(w * .73, h * .04, w * .94, h * .18, w * .965, h * .52);
+        ctx.bezierCurveTo(w * .95, h * .86, w * .72, h * .98, w * .54, h * .75);
+        ctx.bezierCurveTo(w * .51, h * .71, w * .49, h * .71, w * .46, h * .75);
+        ctx.bezierCurveTo(w * .28, h * .98, w * .05, h * .86, w * .035, h * .52);
+        ctx.closePath();
+      } else if (shape === "bag") {
+        ctx.moveTo(w * .05, 0);
+        ctx.lineTo(w * .95, 0);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+      } else {
+        const r = shape === "mousepad" ? Math.min(w, h) * .035 : Math.min(w, h) * .012;
+        ctx.moveTo(r, 0);
+        ctx.lineTo(w - r, 0);
+        ctx.quadraticCurveTo(w, 0, w, r);
+        ctx.lineTo(w, h - r);
+        ctx.quadraticCurveTo(w, h, w - r, h);
+        ctx.lineTo(r, h);
+        ctx.quadraticCurveTo(0, h, 0, h - r);
+        ctx.lineTo(0, r);
+        ctx.quadraticCurveTo(0, 0, r, 0);
+        ctx.closePath();
+      }
+    }
+
+    function isInsideSurface(x, y) {
+      const rect = shell.getBoundingClientRect();
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      pctx.save();
+      pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      shapePath(pctx, rect.width, rect.height);
+      const inside = pctx.isPointInPath(x - rect.left, y - rect.top);
+      pctx.restore();
+      return inside;
+    }
+
+    function drawStroke(a, b, size, mode) {
+      const rect = shell.getBoundingClientRect();
+      const ax = a.x - rect.left;
+      const ay = a.y - rect.top;
+      const bx = b.x - rect.left;
+      const by = b.y - rect.top;
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      const startX = state.lastMidPoint ? state.lastMidPoint.x - rect.left : ax;
+      const startY = state.lastMidPoint ? state.lastMidPoint.y - rect.top : ay;
+      pctx.save();
+      shapePath(pctx, rect.width, rect.height);
+      pctx.clip();
+      pctx.lineCap = "round";
+      pctx.lineJoin = "round";
+      pctx.lineWidth = size;
+      if (mode === "eraser") {
+        pctx.globalCompositeOperation = "destination-out";
+        pctx.globalAlpha = 1;
+        pctx.strokeStyle = "rgba(0,0,0,1)";
+        pctx.beginPath();
+        pctx.moveTo(startX, startY);
+        pctx.quadraticCurveTo(ax, ay, mx, my);
+        pctx.stroke();
+      } else {
+        pctx.globalCompositeOperation = "source-over";
+        pctx.globalAlpha = state.opacity;
+        pctx.strokeStyle = state.color;
+        pctx.beginPath();
+        pctx.moveTo(startX, startY);
+        pctx.quadraticCurveTo(ax, ay, mx, my);
+        pctx.stroke();
+      }
+      pctx.restore();
+      state.lastMidPoint = {
+        x: (a.x + b.x) / 2,
+        y: (a.y + b.y) / 2
+      };
+    }
+
+    function drawCirclePreview(start, end, size) {
+      const rect = shell.getBoundingClientRect();
+      vctx.clearRect(0, 0, rect.width, rect.height);
+      if (!start || !end) return;
+      const sx = start.x - rect.left;
+      const sy = start.y - rect.top;
+      const ex = end.x - rect.left;
+      const ey = end.y - rect.top;
+      const r = Math.hypot(ex - sx, ey - sy);
+      vctx.save();
+      shapePath(vctx, rect.width, rect.height);
+      vctx.clip();
+      vctx.globalAlpha = state.opacity;
+      vctx.strokeStyle = state.color;
+      vctx.lineWidth = size;
+      vctx.lineCap = "round";
+      vctx.beginPath();
+      vctx.arc(sx, sy, r, 0, Math.PI * 2);
+      vctx.stroke();
+      vctx.restore();
+    }
+
+    function commitCircle(circle, size) {
+      if (!circle) return;
+      const rect = shell.getBoundingClientRect();
+      const sx = circle.start.x - rect.left;
+      const sy = circle.start.y - rect.top;
+      const ex = circle.end.x - rect.left;
+      const ey = circle.end.y - rect.top;
+      const r = Math.hypot(ex - sx, ey - sy);
+      snapshot();
+      pctx.save();
+      shapePath(pctx, rect.width, rect.height);
+      pctx.clip();
+      pctx.globalAlpha = state.opacity;
+      pctx.strokeStyle = state.color;
+      pctx.lineWidth = size;
+      pctx.lineCap = "round";
+      pctx.beginPath();
+      pctx.arc(sx, sy, r, 0, Math.PI * 2);
+      pctx.stroke();
+      pctx.restore();
+      vctx.clearRect(0, 0, rect.width, rect.height);
+    }
+
+    function saveImage() {
+      const rect = shell.getBoundingClientRect();
+      const out = document.createElement("canvas");
+      out.width = Math.round(rect.width * 2);
+      out.height = Math.round(rect.height * 2);
+      const ctx = out.getContext("2d");
+      ctx.scale(2, 2);
+      ctx.fillStyle = "#fff";
+      shapePath(ctx, rect.width, rect.height);
+      ctx.fill();
+      shapePath(ctx, rect.width, rect.height);
+      ctx.clip();
+      ctx.drawImage(paint, 0, 0, rect.width, rect.height);
+      const link = document.createElement("a");
+      link.download = "gesture-pastel-canvas.png";
+      link.href = out.toDataURL("image/png");
+      link.click();
+    }
+
+    function setShape(shape) {
+      state.shape = shape;
+      shell.className = "canvas-shell " + shape;
+      document.querySelectorAll(".shape-button").forEach(btn => btn.classList.toggle("active", btn.dataset.shape === shape));
+      requestAnimationFrame(() => {
+        const previous = paint.toDataURL("image/png");
+        fitCanvases();
+        restore(previous);
+      });
+    }
+
+    document.getElementById("undo").addEventListener("click", undo);
+    document.getElementById("redo").addEventListener("click", redo);
+    document.getElementById("save").addEventListener("click", saveImage);
+    document.getElementById("shapeToggle").addEventListener("click", () => shapeMenu.classList.toggle("open"));
+    opacity.addEventListener("input", () => state.opacity = Number(opacity.value));
+    document.querySelectorAll(".shape-button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        setShape(btn.dataset.shape);
+        shapeMenu.classList.remove("open");
+      });
+    });
+
+    function fingerExtended(lm, tip, pip) {
+      return lm[tip].y < lm[pip].y - .018;
+    }
+
+    function thumbExtended(lm, handedness) {
+      const dir = handedness === "Right" ? -1 : 1;
+      return (lm[4].x - lm[3].x) * dir > .025;
+    }
+
+    function countFingers(lm, handedness) {
+      let count = thumbExtended(lm, handedness) ? 1 : 0;
+      if (fingerExtended(lm, 8, 6)) count++;
+      if (fingerExtended(lm, 12, 10)) count++;
+      if (fingerExtended(lm, 16, 14)) count++;
+      if (fingerExtended(lm, 20, 18)) count++;
+      return count;
+    }
+
+    function fingersTogether(lm) {
+      const tips = [4, 8, 12, 16, 20].map(i => lm[i]);
+      let spread = 0;
+      for (let i = 0; i < tips.length; i++) {
+        for (let j = i + 1; j < tips.length; j++) {
+          spread = Math.max(spread, Math.hypot(tips[i].x - tips[j].x, tips[i].y - tips[j].y));
+        }
+      }
+      return spread < .125;
+    }
+
+    function isFist(lm, handedness) {
+      return countFingers(lm, handedness) <= 1 && lm[8].y > lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y;
+    }
+
+    function pointerFrom(lm) {
+      return {
+        x: lm[8].x * window.innerWidth,
+        y: lm[8].y * window.innerHeight
+      };
+    }
+
+    function sizeFromHand(lm, base) {
+      const wrist = lm[0];
+      const middle = lm[12];
+      const span = Math.hypot(wrist.x - middle.x, wrist.y - middle.y);
+      const scale = Math.max(.65, Math.min(2.8, span / .22));
+      return base * scale;
+    }
+
+    function updateCursor(point, size, visible = true) {
+      cursor.style.opacity = visible ? 1 : 0;
+      cursor.style.width = size + "px";
+      cursor.style.height = size + "px";
+      cursor.style.transform = `translate(${point.x - size / 2}px, ${point.y - size / 2}px)`;
+    }
+
+    function smoothToolPoint(point) {
+      if (!state.smoothedToolPoint) {
+        state.smoothedToolPoint = { ...point };
+        return state.smoothedToolPoint;
+      }
+      const alpha = .22;
+      state.smoothedToolPoint.x += (point.x - state.smoothedToolPoint.x) * alpha;
+      state.smoothedToolPoint.y += (point.y - state.smoothedToolPoint.y) * alpha;
+      return state.smoothedToolPoint;
+    }
+
+    function pointInElement(point, el, padding = 0) {
+      const r = el.getBoundingClientRect();
+      return point.x >= r.left - padding && point.x <= r.right + padding && point.y >= r.top - padding && point.y <= r.bottom + padding;
+    }
+
+    function toolAt(point) {
+      const all = [...toolbar.querySelectorAll("button, input")];
+      if (state.lastToolTarget && pointInElement(point, state.lastToolTarget, 14)) return state.lastToolTarget;
+      return all.find(el => pointInElement(point, el, 2));
+    }
+
+    function activateTool(el, point) {
+      if (!el) return;
+      if (el.tagName === "INPUT") {
+        const r = el.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (point.x - r.left) / r.width));
+        const min = Number(el.min);
+        const max = Number(el.max);
+        el.value = String(min + (max - min) * ratio);
+        el.dispatchEvent(new Event("input"));
+        return;
+      }
+      el.click();
+    }
+
+    function updateDwell(point, target) {
+      if (!target) {
+        state.lastToolTarget = null;
+        state.dwellStart = 0;
+        dwellRing.style.opacity = 0;
+        return;
+      }
+      const now = performance.now();
+      if (state.lastToolTarget !== target) {
+        state.lastToolTarget = target;
+        state.dwellStart = now;
+      }
+      const progress = Math.min(1, (now - state.dwellStart) / 950);
+      dwellRing.style.opacity = 1;
+      dwellRing.style.setProperty("--dwell", progress);
+      dwellRing.style.transform = `translate(${point.x - 29}px, ${point.y - 29}px)`;
+      if (progress >= 1) {
+        activateTool(target, point);
+        state.dwellStart = now + 450;
+      }
+    }
+
+    function handleGestureFrame() {
+      const right = state.rightHand;
+      const left = state.leftHand;
+      const leftFist = left && isFist(left.landmarks, "Left");
+      if (!right) {
+        state.lastPoint = null;
+        state.lastMidPoint = null;
+        state.smoothedToolPoint = null;
+        state.drawing = false;
+        updateCursor({ x: 0, y: 0 }, 20, false);
+        return;
+      }
+
+      const lm = right.landmarks;
+      const point = pointerFrom(lm);
+      const fingers = countFingers(lm, "Right");
+      const together = fingersTogether(lm);
+      const brushSize = sizeFromHand(lm, 10);
+      const eraserSize = sizeFromHand(lm, 20);
+
+      if (together) {
+        state.mode = "tool";
+        const toolPoint = smoothToolPoint(point);
+        state.lastPoint = null;
+        state.lastMidPoint = null;
+        state.drawing = false;
+        updateCursor(toolPoint, 34, true);
+        updateDwell(toolPoint, toolAt(toolPoint));
+        return;
+      }
+
+      state.smoothedToolPoint = null;
+      updateDwell(point, null);
+
+      if (leftFist && fingers === 1) {
+        state.mode = "circle";
+        state.drawing = false;
+        state.lastPoint = null;
+        state.lastMidPoint = null;
+        updateCursor(point, brushSize, true);
+        if (isInsideSurface(point.x, point.y)) {
+          if (!state.circle) state.circle = { start: point, end: point, size: brushSize };
+          state.circle.end = point;
+          state.circle.size = brushSize;
+          drawCirclePreview(state.circle.start, state.circle.end, brushSize);
+        }
+        return;
+      }
+
+      if (!leftFist && state.circle) {
+        commitCircle(state.circle, state.circle.size);
+        state.circle = null;
+      }
+
+      if (fingers === 1 || fingers >= 5) {
+        const mode = fingers >= 5 ? "eraser" : "brush";
+        const size = mode === "eraser" ? eraserSize : brushSize;
+        state.mode = mode;
+        updateCursor(point, size, true);
+        if (isInsideSurface(point.x, point.y)) {
+          if (!state.drawing) {
+            snapshot();
+            state.drawing = true;
+            state.lastPoint = point;
+            state.lastMidPoint = point;
+          } else if (state.lastPoint) {
+            drawStroke(state.lastPoint, point, size, mode);
+            state.lastPoint = point;
+          }
+        } else {
+          state.drawing = false;
+          state.lastPoint = null;
+          state.lastMidPoint = null;
+        }
+      } else {
+        state.drawing = false;
+        state.lastPoint = null;
+        state.lastMidPoint = null;
+        updateCursor(point, 24, true);
+      }
+    }
+
+    function onResults(results) {
+      state.rightHand = null;
+      state.leftHand = null;
+      if (results.multiHandLandmarks && results.multiHandedness) {
+        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+          const label = results.multiHandedness[i].label;
+          const hand = { label, landmarks: results.multiHandLandmarks[i] };
+          if (label === "Right") state.rightHand = hand;
+          if (label === "Left") state.leftHand = hand;
+        }
+      }
+      handleGestureFrame();
+    }
+
+    async function bootCamera() {
+      try {
+        if (!window.Hands) {
+          statusBox.textContent = "手势识别库加载中，请保持网络可用。";
+          setTimeout(bootCamera, 600);
+          return;
+        }
+        const hands = new Hands({
+          locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+        hands.setOptions({
+          maxNumHands: 2,
+          modelComplexity: 1,
+          minDetectionConfidence: .72,
+          minTrackingConfidence: .68
+        });
+        hands.onResults(onResults);
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            width: { ideal: 960 },
+            height: { ideal: 720 },
+            facingMode: "user"
+          }
+        });
+        video.srcObject = stream;
+        await video.play();
+        state.mediaReady = true;
+        let sending = false;
+        const detect = async () => {
+          if (!sending && video.readyState >= 2) {
+            sending = true;
+            try {
+              const canvas = state.detectorCanvas;
+              const width = video.videoWidth || 960;
+              const height = video.videoHeight || 720;
+              if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+              }
+              const ctx = canvas.getContext("2d");
+              ctx.save();
+              ctx.clearRect(0, 0, width, height);
+              ctx.translate(width, 0);
+              ctx.scale(-1, 1);
+              ctx.drawImage(video, 0, 0, width, height);
+              ctx.restore();
+              await hands.send({ image: canvas });
+            } finally {
+              sending = false;
+            }
+          }
+          requestAnimationFrame(detect);
+        };
+        requestAnimationFrame(detect);
+        statusBox.textContent = "摄像头已开启：右手一指绘画，五指张开擦除，五指并拢选择工具；左手握拳配合右手画圆。";
+        setTimeout(() => statusBox.classList.add("hidden"), 7600);
+      } catch (err) {
+        statusBox.textContent = "摄像头权限未开启，允许浏览器访问摄像头后刷新页面。";
+        console.error(err);
+      }
+    }
+
+    function initThreeBackdrop() {
+      if (!window.THREE) return;
+      const canvas = document.getElementById("scene");
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      const uniforms = {
+        time: { value: 0 },
+        resolution: { value: new THREE.Vector2(1, 1) }
+      };
+      const material = new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: "void main(){gl_Position=vec4(position,1.0);}",
+        fragmentShader: `
+          precision mediump float;
+          uniform float time;
+          uniform vec2 resolution;
+          float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+          float noise(vec2 p){
+            vec2 i=floor(p), f=fract(p);
+            vec2 u=f*f*(3.0-2.0*f);
+            return mix(mix(hash(i),hash(i+vec2(1.0,0.0)),u.x),mix(hash(i+vec2(0.0,1.0)),hash(i+1.0),u.x),u.y);
+          }
+          void main(){
+            vec2 uv=gl_FragCoord.xy/resolution.xy;
+            vec3 a=vec3(0.31,0.58,0.84);
+            vec3 b=vec3(0.67,0.82,0.94);
+            vec3 c=vec3(0.08,0.27,0.65);
+            float n=noise(uv*10.0+time*.05)*.18+noise(uv*36.0)*.055;
+            float sweep=smoothstep(.0,1.0,uv.y+.14*sin(uv.x*5.0+time*.1));
+            vec3 col=mix(a,b,sweep)+n;
+            col=mix(col,c,.16*smoothstep(.6,.05,distance(uv,vec2(.82,.3))));
+            gl_FragColor=vec4(col,1.0);
+          }`
+      });
+      scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+      function resize() {
+        renderer.setSize(window.innerWidth, window.innerHeight, false);
+        uniforms.resolution.value.set(window.innerWidth * devicePixelRatio, window.innerHeight * devicePixelRatio);
+      }
+      function animate(t) {
+        uniforms.time.value = t * .001;
+        renderer.render(scene, camera);
+        requestAnimationFrame(animate);
+      }
+      resize();
+      window.addEventListener("resize", resize);
+      requestAnimationFrame(animate);
+    }
+
+    window.addEventListener("resize", () => {
+      const previous = paint.toDataURL("image/png");
+      fitCanvases();
+      restore(previous);
+    });
+
+    fitCanvases();
+    bootCamera();
+  </script>
+</body>
+</html>
